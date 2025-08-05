@@ -105,6 +105,30 @@ export function LiquidityManager({ className }: LiquidityManagerProps) {
       }
 
       try {
+        if (mode === 'single') {
+          const depositValue = tokenAValue > 0 ? tokenAValue : tokenBValue;
+          const depositToken = tokenAValue > 0 ? 'tokenA' : 'tokenB';
+
+          if (depositValue > walletBalances[depositToken]) {
+            setEstimatedNDLP(0);
+            setErrors({ [depositToken]: 'Insufficient balance' });
+            return;
+          }
+
+          const half = depositValue / 2;
+          const finalA = depositToken === 'tokenA'
+            ? depositValue - half
+            : half * (poolRatio.tokenA / poolRatio.tokenB);
+          const finalB = depositToken === 'tokenA'
+            ? half * (poolRatio.tokenB / poolRatio.tokenA)
+            : depositValue - half;
+
+          const ndlp = DepositValidator.calculateNDLPShares(finalA, finalB, poolRatio);
+          setEstimatedNDLP(ndlp);
+          setErrors({});
+          return;
+        }
+
         const validation = DepositValidator.validateTokenAmounts(
           tokenAValue,
           tokenBValue,
@@ -123,7 +147,7 @@ export function LiquidityManager({ className }: LiquidityManagerProps) {
           setErrors({});
         } else {
           setEstimatedNDLP(0);
-          
+
           // Set validation errors
           const newErrors: typeof errors = {};
           if (tokenAValue > walletBalances.tokenA) {
@@ -142,7 +166,7 @@ export function LiquidityManager({ className }: LiquidityManagerProps) {
         setErrors({ general: 'Validation failed' });
       }
     }, 300),
-    [tokenAAmount, tokenBAmount, poolRatio, walletBalances]
+    [tokenAAmount, tokenBAmount, poolRatio, walletBalances, mode]
   );
 
   useEffect(() => {
@@ -215,10 +239,14 @@ export function LiquidityManager({ className }: LiquidityManagerProps) {
         tokenA: parseTokenInput(tokenAAmount),
         tokenB: parseTokenInput(tokenBAmount),
         mode,
+        slippage: 1,
       };
 
-      const response = await DepositService.processDualDeposit(request);
-      
+      const response =
+        mode === 'dual'
+          ? await DepositService.processDualDeposit(request)
+          : await DepositService.processSingleDca(request);
+
       setTxHash(response.txHash);
       setIsConfirmModalOpen(false);
       setIsSuccessModalOpen(true);
@@ -227,7 +255,7 @@ export function LiquidityManager({ className }: LiquidityManagerProps) {
       setTokenAAmount('');
       setTokenBAmount('');
       setEstimatedNDLP(0);
-      
+
     } catch (error) {
       console.error('Deposit failed:', error);
       setErrors({ general: 'Deposit failed. Please try again.' });
