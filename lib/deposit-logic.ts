@@ -221,4 +221,73 @@ export class DepositService {
 
     return response;
   }
-} 
+
+  /**
+   * Processes single token deposit using a simple DCA strategy
+   * Splits the input token into two halves and swaps one half to the
+   * counterpart token to match the current pool ratio. This simulates
+   * gradual DCA swaps described in the PRD.
+   */
+  static async processSingleDca(request: DepositRequest): Promise<DepositResponse> {
+    if ((request.slippage ?? 0) > 3) {
+      throw new Error('Slippage too high');
+    }
+
+    const poolRatio = await PoolService.getPoolRatio('SUI-USDC');
+    const walletBalances = await WalletService.getWalletBalances(request.userAddress);
+
+    const depositToken = request.tokenA > 0 ? 'tokenA' : request.tokenB > 0 ? 'tokenB' : null;
+    if (!depositToken) {
+      throw new Error('No deposit amount provided');
+    }
+
+    const amount = depositToken === 'tokenA' ? request.tokenA : request.tokenB;
+    if (amount <= 0) {
+      throw new Error('Invalid deposit amount');
+    }
+    if (amount > walletBalances[depositToken]) {
+      throw new Error('Insufficient balance');
+    }
+
+    // Split into two halves (simple DCA simulation)
+    const half = amount / 2;
+    let finalTokenA = 0;
+    let finalTokenB = 0;
+
+    if (depositToken === 'tokenA') {
+      finalTokenA = amount - half;
+      finalTokenB = half * (poolRatio.tokenB / poolRatio.tokenA);
+    } else {
+      finalTokenA = half * (poolRatio.tokenA / poolRatio.tokenB);
+      finalTokenB = amount - half;
+    }
+
+    const validation = DepositValidator.validateTokenAmounts(
+      finalTokenA,
+      finalTokenB,
+      poolRatio,
+      walletBalances
+    );
+
+    if (!validation.isValid) {
+      throw new Error('Invalid DCA result');
+    }
+
+    const ndlpShares = DepositValidator.calculateNDLPShares(
+      validation.finalTokenA,
+      validation.finalTokenB,
+      poolRatio
+    );
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    return {
+      deployedTokenA: validation.finalTokenA,
+      deployedTokenB: validation.finalTokenB,
+      excessTokenA: 0,
+      excessTokenB: 0,
+      NDLPissued: ndlpShares,
+      txHash: `0x${Math.random().toString(16).substr(2, 64)}`
+    };
+  }
+}
